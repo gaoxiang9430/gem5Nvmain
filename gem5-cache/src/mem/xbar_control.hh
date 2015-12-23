@@ -1,0 +1,480 @@
+/*
+ * Copyright (c) 2011-2014 ARM Limited
+ * All rights reserved
+ *
+ * The license below extends only to copyright in the software and shall
+ * not be construed as granting a license to any other intellectual
+ * property including but not limited to intellectual property relating
+ * to a hardware implementation of the functionality of the software
+ * licensed hereunder.  You may use the software subject to the license
+ * terms below provided that you ensure that this notice is replicated
+ * unmodified and in its entirety in all distributions of the software,
+ * modified or unmodified, in source code or in binary form.
+ *
+ * Copyright (c) 2002-2005 The Regents of The University of Michigan
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are
+ * met: redistributions of source code must retain the above copyright
+ * notice, this list of conditions and the following disclaimer;
+ * redistributions in binary form must reproduce the above copyright
+ * notice, this list of conditions and the following disclaimer in the
+ * documentation and/or other materials provided with the distribution;
+ * neither the name of the copyright holders nor the names of its
+ * contributors may be used to endorse or promote products derived from
+ * this software without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+ * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+ * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+ * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+ * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ *
+ * Authors: Ron Dreslinski
+ *          Ali Saidi
+ *          Andreas Hansson
+ *          William Wang
+ */
+
+/**
+ * @file
+ * Declaration of a coherent crossbar.
+ */
+
+#ifndef __MEM_COHERENT_XBAR_HH__
+#define __MEM_COHERENT_XBAR_HH__
+//light
+#include "mem/packet.hh"
+#include "sim/eventq.hh"
+#include "sim/system.hh"
+//end
+#include "base/hashmap.hh"
+#include "mem/snoop_filter.hh"
+#include "mem/xbar.hh"
+#include "params/XBarControl.hh"
+
+/**
+ * A coherent crossbar connects a number of (potentially) snooping
+ * masters and slaves, and routes the request and response packets
+ * based on the address, and also forwards all requests to the
+ * snoopers and deals with the snoop responses.
+ *
+ * The coherent crossbar can be used as a template for modelling QPI,
+ * HyperTransport, ACE and coherent OCP buses, and is typically used
+ * for the L1-to-L2 buses and as the main system interconnect.  @sa
+ * \ref gem5MemorySystem "gem5 Memory System"
+ */
+class XBarControl : public BaseXBar
+{
+
+  protected:
+
+    /**
+     * Declare the layers of this crossbar, one vector for requests,
+     * one for responses, and one for snoop responses
+     */
+    typedef Layer<SlavePort,MasterPort> ReqLayer;
+    typedef Layer<MasterPort,SlavePort> RespLayer;
+    typedef Layer<SlavePort,MasterPort> SnoopLayer;
+    std::vector<ReqLayer*> reqLayers;
+    std::vector<RespLayer*> respLayers;
+    std::vector<SnoopLayer*> snoopLayers;
+
+    /**
+     * Declaration of the coherent crossbar slave port type, one will
+     * be instantiated for each of the master ports connecting to the
+     * crossbar.
+     */
+    class XBarControlSlavePort : public SlavePort
+    {
+ 
+      private:
+
+        /** A reference to the crossbar to which this port belongs. */
+        XBarControl &xbar;
+
+      public:
+
+        XBarControlSlavePort(const std::string &_name,
+                             XBarControl &_xbar, PortID _id)
+            : SlavePort(_name, &_xbar, _id), xbar(_xbar)
+        { }
+
+      protected:
+
+        /**
+         * When receiving a timing request, pass it to the crossbar.
+         */
+        virtual bool recvTimingReq(PacketPtr pkt)
+        { return xbar.recvTimingReq(pkt, id); }
+
+        /**
+         * When receiving a timing snoop response, pass it to the crossbar.
+         */
+        virtual bool recvTimingSnoopResp(PacketPtr pkt)
+        { return xbar.recvTimingSnoopResp(pkt, id); }
+
+        /**
+         * When receiving an atomic request, pass it to the crossbar.
+         */
+        virtual Tick recvAtomic(PacketPtr pkt)
+        { return xbar.recvAtomic(pkt, id); }
+
+        /**
+         * When receiving a functional request, pass it to the crossbar.
+         */
+        virtual void recvFunctional(PacketPtr pkt)
+        { xbar.recvFunctional(pkt, id); }
+
+        /**
+         * When receiving a retry, pass it to the crossbar.
+         */
+        virtual void recvRetry()
+        { panic("Crossbar slave ports should never retry.\n"); }
+
+        /**
+         * Return the union of all adress ranges seen by this crossbar.
+         */
+        virtual AddrRangeList getAddrRanges() const
+        { return xbar.getAddrRanges(); }
+
+    };
+
+    /**
+     * Declaration of the coherent crossbar master port type, one will be
+     * instantiated for each of the slave interfaces connecting to the
+     * crossbar.
+     */
+    class XBarControlMasterPort : public MasterPort
+    {
+      private:
+        /** A reference to the crossbar to which this port belongs. */
+        XBarControl &xbar;
+
+      public:
+
+        XBarControlMasterPort(const std::string &_name,
+                              XBarControl &_xbar, PortID _id)
+            : MasterPort(_name, &_xbar, _id), xbar(_xbar)
+        { }
+
+      protected:
+
+        /**
+         * Determine if this port should be considered a snooper. For
+         * a coherent crossbar master port this is always true.
+         *
+         * @return a boolean that is true if this port is snooping
+         */
+        virtual bool isSnooping() const
+        { return true; }
+
+        /**
+         * When receiving a timing response, pass it to the crossbar.
+         */
+        virtual bool recvTimingResp(PacketPtr pkt)
+        { return xbar.recvTimingResp(pkt, id); }
+
+        /**
+         * When receiving a timing snoop request, pass it to the crossbar.
+         */
+        virtual void recvTimingSnoopReq(PacketPtr pkt)
+        { return xbar.recvTimingSnoopReq(pkt, id); }
+
+        /**
+         * When receiving an atomic snoop request, pass it to the crossbar.
+         */
+        virtual Tick recvAtomicSnoop(PacketPtr pkt)
+        { return xbar.recvAtomicSnoop(pkt, id); }
+
+        /**
+         * When receiving a functional snoop request, pass it to the crossbar.
+         */
+        virtual void recvFunctionalSnoop(PacketPtr pkt)
+        { xbar.recvFunctionalSnoop(pkt, id); }
+
+        /** When reciving a range change from the peer port (at id),
+            pass it to the crossbar. */
+        virtual void recvRangeChange()
+        { xbar.recvRangeChange(id); }
+
+        /** When reciving a retry from the peer port (at id),
+            pass it to the crossbar. */
+        virtual void recvRetry()
+        { xbar.recvRetry(id); }
+
+    };
+
+    /**
+     * Internal class to bridge between an incoming snoop response
+     * from a slave port and forwarding it through an outgoing slave
+     * port. It is effectively a dangling master port.
+     */
+    class SnoopRespPort : public MasterPort
+    {
+
+      private:
+
+        /** The port which we mirror internally. */
+        SlavePort& slavePort;
+
+      public:
+
+        /**
+         * Create a snoop response port that mirrors a given slave port.
+         */
+        SnoopRespPort(SlavePort& slave_port, XBarControl& _xbar) :
+            MasterPort(slave_port.name() + ".snoopRespPort", &_xbar),
+            slavePort(slave_port) { }
+
+        /**
+         * Override the sending of retries and pass them on through
+         * the mirrored slave port.
+         */
+        void sendRetry() {
+            slavePort.sendRetry();
+        }
+
+        /**
+         * Provided as necessary.
+         */
+        void recvRetry() { panic("SnoopRespPort should never see retry\n"); }
+
+        /**
+         * Provided as necessary.
+         */
+        bool recvTimingResp(PacketPtr pkt)
+        {
+            panic("SnoopRespPort should never see timing response\n");
+            return false;
+        }
+
+    };
+
+    std::vector<SnoopRespPort*> snoopRespPorts;
+
+    std::vector<SlavePort*> snoopPorts;
+
+    /**
+     * Store the outstanding requests so we can determine which ones
+     * we generated and which ones were merely forwarded. This is used
+     * in the coherent crossbar when coherency responses come back.
+     */
+    m5::hash_set<RequestPtr> outstandingReq;
+
+    /**
+     * Keep a pointer to the system to be allow to querying memory system
+     * properties.
+     */
+    System *system;
+//light
+    bool haveRefuse;
+    uint8_t numCpu;
+    uint8_t pcmReadMigLocation;
+    uint8_t dramReadMigLocation;
+    uint8_t pcmWriteMigLocation;
+    uint8_t dramWriteMigLocation;
+    bool readDone;
+    bool writeDone;
+    bool pcm_empty;
+    bool dram_empty;
+    int numOfSets;
+    PacketPtr tempPkt;
+    PortID tempId;
+    int acrossThreadId;
+    int lockedThreadId;
+    page_info *MQ_head[15];
+    page_info *MQ_tail[15];
+    //migrating functin
+uint8_t pcmMigrationLeft;
+uint8_t dramMigrationLeft;
+Tick migrationStartTick;
+Tick migrationEndTick;
+std::vector<std::pair<int,int>> migratingPage;
+//std::vector<PacketPtr> invalidPcmWbPacket;
+//std::vector<PacketPtr> invalidDramWbPacket;
+std::vector<PacketPtr> invalidWbPacket;
+std::vector<PacketPtr> readWaitingPacket;
+std::vector<PacketPtr> writeWaitingPacket;
+char **pcmBuffer;
+bool pcmDataValid[64];
+char **dramBuffer;
+bool dramDataValid[64];
+bool PcmOrDram(Addr addr);
+void migratingFunc();
+void doMigrating();
+void satisfyWaitingWriteRequest();
+//bool satisfyWaitingRequest(PacketPtr pkt);
+void satisfyWaitingRequest();
+void satisfyWaitingRequest(uint8_t index,bool Pcm); 
+void processMigrationRespond(PacketPtr respondPacket);
+void readFromMemory(int pcmSrc,int dramSrc = 0);
+void writeToMemory(int dramDes,int pcmDes = 0);
+    
+    //page rank function
+    page_info *addr_to_pageinfo(Addr addr);
+    void insert_into_MQ(page_info *page_temp,int MQ_number);
+    void change_queue(page_info *page_change);
+    void insert_into_victim(page_info *page_temp);
+    void insert_into_unranked(page_info *page_temp);
+    void access_page(Addr addr);
+    void move_to_up(page_info *page_temp);
+    void move_to_low(page_info *page_temp);
+    void MQ_upgrade();
+    void MQ_expiration();
+    void output_MQ();
+    
+    bool processReqEvent();
+    //EventWrapper<XBarControl,&XBarControl::processReqEvent> ReqEvent;
+    
+    EventWrapper<XBarControl,&XBarControl::satisfyWaitingRequest> WaitingRespondEvent;
+    
+    bool processRespondEvent();
+    //EventWrapper<XBarControl,&XBarControl::processRespondEvent> RespondEvent;
+    void processWriteToMemory();
+    void processReadFromMemory();
+    //void processPcmInvalidWb();
+    //void processDramInvalidWb();
+    void doSomeEndThing();
+    void processInvalidWb();
+    EventWrapper<XBarControl,&XBarControl::processInvalidWb> invalidWbMigEvent;
+    EventWrapper<XBarControl,&XBarControl::processReadFromMemory> readMigEvent;
+    EventWrapper<XBarControl,&XBarControl::processWriteToMemory> writeMigEvent;
+    EventWrapper<XBarControl,&XBarControl::doMigrating> MigratingEvent;
+    //EventWrapper<XBarControl,&XBarControl::processPcmInvalidWb> InvalidPcmWbEvent;
+    //EventWrapper<XBarControl,&XBarControl::processDramInvalidWb> InvalidDramWbEvent;
+//end
+    /** A snoop filter that tracks cache line residency and can restrict the
+      * broadcast needed for probes.  NULL denotes an absent filter. */
+    SnoopFilter *snoopFilter;
+
+    /** Function called by the port when the crossbar is recieving a Timing
+      request packet.*/
+    bool recvTimingReq(PacketPtr pkt, PortID slave_port_id);
+
+    /** Function called by the port when the crossbar is recieving a Timing
+      response packet.*/
+    bool recvTimingResp(PacketPtr pkt, PortID master_port_id);
+
+    /** Function called by the port when the crossbar is recieving a timing
+        snoop request.*/
+    void recvTimingSnoopReq(PacketPtr pkt, PortID master_port_id);
+
+    /** Function called by the port when the crossbar is recieving a timing
+        snoop response.*/
+    bool recvTimingSnoopResp(PacketPtr pkt, PortID slave_port_id);
+
+    /** Timing function called by port when it is once again able to process
+     * requests. */
+    void recvRetry(PortID master_port_id);
+
+    /**
+     * Forward a timing packet to our snoopers, potentially excluding
+     * one of the connected coherent masters to avoid sending a packet
+     * back to where it came from.
+     *
+     * @param pkt Packet to forward
+     * @param exclude_slave_port_id Id of slave port to exclude
+     */
+    void forwardTiming(PacketPtr pkt, PortID exclude_slave_port_id) {
+        forwardTiming(pkt, exclude_slave_port_id, snoopPorts);
+    }
+
+    /**
+     * Forward a timing packet to a selected list of snoopers, potentially
+     * excluding one of the connected coherent masters to avoid sending a packet
+     * back to where it came from.
+     *
+     * @param pkt Packet to forward
+     * @param exclude_slave_port_id Id of slave port to exclude
+     * @param dests Vector of destination ports for the forwarded pkt
+     */
+    void forwardTiming(PacketPtr pkt, PortID exclude_slave_port_id,
+                       const std::vector<SlavePort*>& dests);
+
+    /** Function called by the port when the crossbar is recieving a Atomic
+      transaction.*/
+    Tick recvAtomic(PacketPtr pkt, PortID slave_port_id);
+
+    /** Function called by the port when the crossbar is recieving an
+        atomic snoop transaction.*/
+    Tick recvAtomicSnoop(PacketPtr pkt, PortID master_port_id);
+
+    /**
+     * Forward an atomic packet to our snoopers, potentially excluding
+     * one of the connected coherent masters to avoid sending a packet
+     * back to where it came from.
+     *
+     * @param pkt Packet to forward
+     * @param exclude_slave_port_id Id of slave port to exclude
+     *
+     * @return a pair containing the snoop response and snoop latency
+     */
+    std::pair<MemCmd, Tick> forwardAtomic(PacketPtr pkt,
+                                          PortID exclude_slave_port_id)
+    {
+        return forwardAtomic(pkt, exclude_slave_port_id, InvalidPortID, snoopPorts);
+    }
+
+    /**
+     * Forward an atomic packet to a selected list of snoopers, potentially
+     * excluding one of the connected coherent masters to avoid sending a packet
+     * back to where it came from.
+     *
+     * @param pkt Packet to forward
+     * @param exclude_slave_port_id Id of slave port to exclude
+     * @param source_master_port_id Id of the master port for snoops from below
+     * @param dests Vector of destination ports for the forwarded pkt
+     *
+     * @return a pair containing the snoop response and snoop latency
+     */
+    std::pair<MemCmd, Tick> forwardAtomic(PacketPtr pkt,
+                                          PortID exclude_slave_port_id,
+                                          PortID source_master_port_id,
+                                          const std::vector<SlavePort*>& dests);
+
+    /** Function called by the port when the crossbar is recieving a Functional
+        transaction.*/
+    void recvFunctional(PacketPtr pkt, PortID slave_port_id);
+
+    /** Function called by the port when the crossbar is recieving a functional
+        snoop transaction.*/
+    void recvFunctionalSnoop(PacketPtr pkt, PortID master_port_id);
+
+    /**
+     * Forward a functional packet to our snoopers, potentially
+     * excluding one of the connected coherent masters to avoid
+     * sending a packet back to where it came from.
+     *
+     * @param pkt Packet to forward
+     * @param exclude_slave_port_id Id of slave port to exclude
+     */
+    void forwardFunctional(PacketPtr pkt, PortID exclude_slave_port_id);
+
+    Stats::Scalar snoops;
+    Stats::Distribution snoopFanout;
+//light
+    Stats::Scalar pageMigrationNumber;
+    Stats::Scalar migrationTick;
+//end
+  public:
+
+    virtual void init();
+
+    XBarControl(const XBarControlParams *p);
+
+    virtual ~XBarControl();
+
+    unsigned int drain(DrainManager *dm);
+
+    virtual void regStats();
+};
+
+#endif //__MEM_COHERENT_XBAR_HH__

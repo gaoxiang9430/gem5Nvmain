@@ -1,0 +1,114 @@
+--------------------------------------------------------------------------------
+
+       10                                  
+  1   0101       ************************  
+  01  1010 10      The Cactus Code V4.0    
+ 1010 1101 011      www.cactuscode.org     
+  1001 100101    ************************  
+    00010101                               
+     100011     (c) Copyright The Authors  
+      0100      GNU Licensed. No Warranty  
+      0101                                 
+
+--------------------------------------------------------------------------------
+
+Cactus version: 4.0.b11
+Parameter file: /home/xiang/workspace/gem5src/benchspec/CPU2006/436.cactusADM/data/test/input/benchADM.par
+--------------------------------------------------------------------------------
+
+Activating thorn Cactus...Success -> active implementation Cactus
+Activation requested for 
+--->einstein time benchadm pugh pughreduce cartgrid3d ioutil iobasic <---
+Activating thorn benchadm...Success -> active implementation benchadm
+Activating thorn cartgrid3d...Success -> active implementation grid
+Activating thorn einstein...Success -> active implementation einstein
+Activating thorn iobasic...Success -> active implementation IOBasic
+Activating thorn ioutil...Success -> active implementation IO
+Activating thorn pugh...Success -> active implementation driver
+Activating thorn pughreduce...Success -> active implementation reduce
+Activating thorn time...Success -> active implementation time
+--------------------------------------------------------------------------------
+  if (recover)
+    Recover parameters
+  endif
+
+  Startup routines
+    BenchADM: Register slicings
+    CartGrid3D: Register GH Extension for GridSymmetry
+    CartGrid3D: Register coordinates for the Cartesian grid
+    PUGH: Startup routine
+    IOUtil: Startup routine
+    IOBasic: Startup routine
+    PUGHReduce: Startup routine.
+
+  Parameter checking routines
+    BenchADM: Check parameters
+    CartGrid3D: Check coordinates for CartGrid3D
+
+  Initialisation
+    CartGrid3D: Set up spatial 3D Cartesian coordinates on the GH
+    Einstein: Set up GF symmetries
+    Einstein: Initialize slicing, setup priorities for mixed slicings
+    PUGH: Report on PUGH set up
+    Time: Initialise Time variables
+    Time: Set timestep based on Courant condition
+    Einstein: Initialisation for Einstein methods
+    Einstein: Flat initial data
+    BenchADM: Setup for ADM
+    Einstein: Set initial lapse to a gaussian
+    BenchADM: Time symmetric initial data for staggered leapfrog
+    if (recover)
+    endif
+    if (checkpoint initial data)
+    endif
+    if (analysis)
+      Einstein: Compute the trace of the extrinsic curvature
+      Einstein: Calculate the spherical metric in r,theta(q), phi(p)
+      Einstein: Calculate the spherical ex. curvature in r, theta(q), phi(p)
+    endif
+
+  do loop over timesteps
+    Rotate timelevels
+    iteration = iteration + 1
+    t = t+dt
+    Einstein: Identify the slicing for the next iteration
+    BenchADM: Evolve using Staggered Leapfrog
+    if (checkpoint)
+    endif
+    if (analysis)
+      Einstein: Compute the trace of the extrinsic curvature
+      Einstein: Calculate the spherical metric in r,theta(q), phi(p)
+      Einstein: Calculate the spherical ex. curvature in r, theta(q), phi(p)
+    endif
+  enddo
+  Termination routines
+    PUGH: Termination routine
+  Shutdown routines
+--------------------------------------------------------------------------------
+--------------------------------------------------------------------------------
+Driver provided by PUGH
+--------------------------------------------------------------------------------
+
+INFO (IOBasic): I/O Method 'Scalar' registered
+INFO (IOBasic): Scalar: Output of scalar quantities (grid scalars, reductions) to ASCII files
+INFO (IOBasic): I/O Method 'Info' registered
+INFO (IOBasic): Info: Output of scalar quantities (grid scalars, reductions) to screen
+INFO (BenchADM): Evolve using the ADM system
+INFO (BenchADM):   with staggered leapfrog
+INFO (CartGrid3D): Grid Spacings:
+INFO (CartGrid3D):  dx=>1.0000000e-01  dy=>1.0000000e-01  dz=>1.0000000e-01  
+INFO (CartGrid3D): Computational Coordinates:
+INFO (CartGrid3D):  x=>[-1.950, 1.950]  y=>[-1.950, 1.950]  z=>[-1.950, 1.950]  
+INFO (CartGrid3D): Indices of Physical Coordinates:
+INFO (CartGrid3D):  x=>[0,39]  y=>[0,39]  z=>[0,39]  
+INFO (PUGH): Single processor evolution
+INFO (PUGH): 3-dimensional grid functions
+INFO (PUGH):   Size: 40 40 40
+INFO (Einstein): Setting flat Minkowski space in Einstein
+INFO (IOBasic): Info: Output every 10 iterations
+INFO (IOBasic): Info: Output requested for BENCHADM::ADM_gxx BENCHADM::ADM_gyz
+------------------------------------------------------------------------------
+  it  |          | BENCHADM::ADM_gxx           | BENCHADM::ADM_gyz           |
+      |    t     | minimum      | maximum      | minimum      | maximum      |
+------------------------------------------------------------------------------
+    0 |    0.000 |   1.00000000 |   1.00000000 |   0.00000000 |   0.00000000 |

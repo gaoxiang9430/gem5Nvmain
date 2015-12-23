@@ -1,0 +1,23 @@
+In general, fuzzing mainly employs random or semi-random method to create input sets automatically for software testing. With the development of the technology, some method based on protocal and file format are emerged in recent years, meanwhile heuristic rules start to be used for testing inout generation. Despite the optimistic development speed, there are some limitations in black-box testing.
+First，you can find the errors caused by a small range of inputs;
+Second, it it difficult to find exception from a combination of several input files;
+
+To deal with those problems, some researches proposed to combine fuzzing and symbolic excution together， where the result of symbolic exection guide the procedure of the testing input generation. 
+1, The program is  loaded and executed by a binary code monitoring platform with testing inputs regarded as the symbolic variables.
+2, Utility codes are used to detect the running states, and than analyse the dependency relationships between the constraints and the testing inputs.
+3, Collecting the constraints of all the paths.
+4, creating new path by reverse parts of contraints of a certain path according to enumerate algorithm.
+5, constraint-solving and creating testing inputs.
+
+Some Key Technology
+1, Utility Code
+To collect the constraints of the exection path, we hava to modify the source codes. Firstly, we should interpret the mechine codes into media codes with transparent register and memory operations which is benefit for code analysis. For example, we can change a signal command(mov eax, t1) into a function(
+	push 4
+	push tl
+	push 0
+	call Ox401816
+). Futhermore, Using the method of program instrumentation in those function, we can collect the constraints information easily.
+2, Dataflow Analysis Based on Spot
+In the procedure of spot analysis, the incredible data which may be used by hakers are marked as spot data. Then, we can find the effects of the spot data by monitoring its spread and usage. Traditional spot analysis concentrates the flow and the usage of the spot data, without considering its sourse, so we added a source attribute additionly. During the generation of the path constaints, utility code checks the parameters firstly, and then determine the dependency relationship between the constraints and the testing inputs. We can ignore the constraints which is independent of inputing data(spot data).
+3, Enumerate Algorithm
+To maximaze path coverage and optimise path contraints, we proposed a enumerate algorithm based on iteration. In this algorithm, we reverse the path constraints from top to bottom, and we process this operation in a loop until completing the ergodicity of the excution tree. This strategy can maximize utilization of cache, meanwhile increase the path coverage in limit exection time.
